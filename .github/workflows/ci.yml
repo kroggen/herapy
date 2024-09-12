@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ develop, master ]
+  pull_request:
+    branches: [ develop, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10"]
+
+    services:
+      docker:
+        image: docker:19.03.12
+        options: --privileged
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        pip install -r requirements_dev.txt
+        pip install -r requirements.txt
+
+    - name: Install docker-compose
+      run: |
+        sudo curl -L "https://github.com/docker/compose/releases/download/v2.23.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+
+    - name: Set up test environment
+      run: |
+        docker-compose -f ./local_test_nodes/docker-compose.yml up -d
+        sleep 10
+
+    - name: Run tests and checks
+      run: |
+        pytest --cov-report=html --cov=aergo/ tests/
+        mypy -p aergo -p tests
+        flake8 --exclude=*_pb2_grpc.py,*_pb2.py,aergo_conf.py --ignore=E722,W503 --per-file-ignores="__init__.py:F401" aergo tests
+
+    - name: Clean up test environment
+      run: docker-compose -f ./local_test_nodes/docker-compose.yml down
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
